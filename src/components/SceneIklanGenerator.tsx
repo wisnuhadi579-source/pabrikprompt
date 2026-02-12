@@ -2,7 +2,6 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Zap, Loader2, Key, X, Upload, CheckCircle2, Video, ImageIcon, Copy, Download } from 'lucide-react';
 
-// KUNCI 1: Pastikan Export Default untuk Lolos Deploy
 export default function SceneIklanGenerator({ onBack }) {
     const [selectedStyle, setSelectedStyle] = useState('story-telling');
     const [selectedSceneCount, setSelectedSceneCount] = useState(5);
@@ -11,13 +10,12 @@ export default function SceneIklanGenerator({ onBack }) {
     const [loadingMsg, setLoadingMsg] = useState('');
     const [results, setResults] = useState(null);
 
-    // KUNCI 2: Input Detail Lengkap Sesuai Desain Asli
+    // --- FITUR YANG DIKEMBALIKAN (LENGKAP) ---
     const [productDesc, setProductDesc] = useState('');
     const [modelAIDesc, setModelAIDesc] = useState('');
     const [sellingType, setSellingType] = useState('soft-selling');
     const [uploadedFiles, setUploadedFiles] = useState({ product: null, background: null, model: null });
 
-    // KUNCI 3: API Pool 5 Key
     const [apiKeys, setApiKeys] = useState(() => {
         const saved = localStorage.getItem('pabrik_api_pool');
         return saved ? JSON.parse(saved) : ["", "", "", "", ""];
@@ -44,7 +42,6 @@ export default function SceneIklanGenerator({ onBack }) {
         }
     };
 
-    // KUNCI 4: Logika Generate + Rotasi Key + Jeda 5 Detik
     const handleGenerate = async () => {
         const apiKey = getRandomApiKey();
         if (!apiKey) return setShowApiModal(true);
@@ -53,27 +50,42 @@ export default function SceneIklanGenerator({ onBack }) {
 
         try {
             setLoadingMsg("AI sedang menyusun naskah...");
-            const planPrompt = `Sutradara AI. Produk: ${productDesc}. Tipe: ${sellingType}. Adegan: ${selectedSceneCount}. JSON: {"script": "naskah", "prompts": ["visual 1", "visual 2"]}`;
+            const planPrompt = `Sutradara AI. Produk: ${productDesc}. Tipe: ${sellingType}. Adegan: ${selectedSceneCount}. Gaya: ${selectedStyle}. JSON: {"script": "naskah lengkap", "prompts": ["visual adegan 1", "visual adegan 2"]}`;
+            
+            const parts = [{ text: planPrompt }];
+            if (uploadedFiles.product) parts.push({ inlineData: { mimeType: "image/png", data: uploadedFiles.product.split(',')[1] } });
+
             const resPlan = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ contents: [{ parts: [{ text: planPrompt }] }], generationConfig: { responseMimeType: "application/json" } })
+                body: JSON.stringify({ contents: [{ parts }], generationConfig: { responseMimeType: "application/json" } })
             });
             const plan = JSON.parse((await resPlan.json()).candidates[0].content.parts[0].text);
 
             const images = [];
             for (let i = 0; i < plan.prompts.length; i++) {
-                const currentKey = getRandomApiKey() || apiKey;
+                const currentKey = getRandomApiKey() || apiKey; // Rotasi 5 API Key
                 setLoadingMsg(`Visual Adegan ${i + 1}/${selectedSceneCount}...`);
+                
                 const imgRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-image-preview:generateContent?key=${currentKey}`, {
                     method: 'POST',
-                    body: JSON.stringify({ contents: [{ parts: [{ text: `${plan.prompts[i]}, 9:16 vertical` }] }], generationConfig: { responseModalities: ["IMAGE"] } })
+                    body: JSON.stringify({ 
+                        contents: [{ parts: [{ text: `${plan.prompts[i]}, ultra-realistic, 9:16 vertical` }] }],
+                        generationConfig: { responseModalities: ["IMAGE"] }
+                    })
                 });
+
+                if (imgRes.status === 429) {
+                    setLoadingMsg("Limit RPM! Menunggu 10 detik...");
+                    await delay(10000);
+                    i--; continue;
+                }
+
                 images.push(`data:image/png;base64,${(await imgRes.json()).candidates[0].content.parts.find(p => p.inlineData).inlineData.data}`);
                 
                 if (i < plan.prompts.length - 1) {
-                    setLoadingMsg(`Jeda 5 detik anti-limit...`);
-                    await delay(5000); 
+                    setLoadingMsg(`Berhasil! Jeda 5 detik anti-limit...`);
+                    await delay(5000); // Jeda 5 detik antar generate
                 }
             }
             setResults({ script: plan.script, images, prompts: plan.prompts });
@@ -108,41 +120,69 @@ export default function SceneIklanGenerator({ onBack }) {
 
                     <section className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
                         <h2 className="text-lg font-bold mb-6">Langkah 2: Detail Konten</h2>
-                        <div className="space-y-6">
-                            <div className="pl-7 space-y-4">
-                                <label className="block text-xs font-bold text-gray-400 uppercase">1. Produk & Background</label>
+                        <div className="space-y-8">
+                            {/* 1. Produk & Background */}
+                            <div className="pl-7 space-y-4 border-l-2 border-gray-50 ml-2">
+                                <label className="block text-xs font-bold text-gray-400 uppercase tracking-tighter">1. Produk & Background</label>
                                 <div className="grid grid-cols-2 gap-2">
                                     <div className="relative border-2 border-dashed rounded-xl p-3 text-center hover:bg-purple-50 transition-all">
                                         <input type="file" onChange={(e) => handleFileChange(e, 'product')} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
                                         {uploadedFiles.product ? <CheckCircle2 className="mx-auto text-green-500" size={20}/> : <Upload className="mx-auto text-gray-400" size={20}/>}
-                                        <p className="text-[9px] mt-1 text-gray-500">Produk Utama</p>
+                                        <p className="text-[9px] mt-1 text-gray-500 font-bold">Foto Produk Utama</p>
                                     </div>
                                     <div className="relative border-2 border-dashed rounded-xl p-3 text-center hover:bg-purple-50 transition-all">
                                         <input type="file" onChange={(e) => handleFileChange(e, 'background')} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
                                         {uploadedFiles.background ? <CheckCircle2 className="mx-auto text-green-500" size={20}/> : <Upload className="mx-auto text-gray-400" size={20}/>}
-                                        <p className="text-[9px] mt-1 text-gray-500">Background</p>
+                                        <p className="text-[9px] mt-1 text-gray-500 font-bold">Upload Background</p>
                                     </div>
                                 </div>
                                 <textarea value={productDesc} onChange={(e) => setProductDesc(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs h-20 outline-none" placeholder="Ceritakan detail produk Anda..."/>
                             </div>
 
-                            <div className="pl-7">
-                                <label className="block text-xs font-bold text-gray-400 uppercase mb-3">2. Model</label>
+                            {/* 2. Model */}
+                            <div className="pl-7 border-l-2 border-gray-50 ml-2">
+                                <label className="block text-xs font-bold text-gray-400 uppercase mb-3 tracking-tighter">2. Model</label>
                                 <div className="flex bg-gray-100 p-1 rounded-xl mb-3">
-                                    <button onClick={() => setModelMode('upload')} className={`flex-1 py-2 text-[10px] font-bold rounded-lg ${modelMode === 'upload' ? 'bg-purple-600 text-white' : 'text-gray-500'}`}>Upload Foto</button>
-                                    <button onClick={() => setModelMode('generate')} className={`flex-1 py-2 text-[10px] font-bold rounded-lg ${modelMode === 'generate' ? 'bg-purple-600 text-white' : 'text-gray-500'}`}>Generator AI</button>
+                                    <button onClick={() => setModelMode('upload')} className={`flex-1 py-2 text-[10px] font-bold rounded-lg transition-all ${modelMode === 'upload' ? 'bg-purple-600 text-white shadow-md' : 'text-gray-500'}`}>Upload Foto</button>
+                                    <button onClick={() => setModelMode('generate')} className={`flex-1 py-2 text-[10px] font-bold rounded-lg transition-all ${modelMode === 'generate' ? 'bg-purple-600 text-white shadow-md' : 'text-gray-500'}`}>Generator AI</button>
                                 </div>
                                 {modelMode === 'upload' ? (
                                     <div className="relative border-2 border-dashed rounded-xl p-3 text-center hover:bg-purple-50">
                                         <input type="file" onChange={(e) => handleFileChange(e, 'model')} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
                                         {uploadedFiles.model ? <CheckCircle2 className="mx-auto text-green-500" size={20}/> : <Upload className="mx-auto text-gray-400" size={20}/>}
-                                        <p className="text-[9px] mt-1">Foto Model</p>
+                                        <p className="text-[9px] mt-1 font-bold text-gray-500">Upload Foto Model</p>
                                     </div>
                                 ) : (
-                                    <textarea value={modelAIDesc} onChange={(e) => setModelAIDesc(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs h-20 outline-none" placeholder="Cth: Wanita Asia, baju santai..."/>
+                                    <textarea value={modelAIDesc} onChange={(e) => setModelAIDesc(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs h-20 outline-none" placeholder="Cth: Wanita Asia, rambut panjang..."/>
                                 )}
                             </div>
+
+                            {/* 3. Pengaturan Iklan (DIKEMBALIKAN) */}
+                            <div className="pl-7 space-y-4 border-l-2 border-gray-50 ml-2">
+                                <label className="block text-xs font-bold text-gray-400 uppercase tracking-tighter">3. Pengaturan Iklan</label>
+                                <div>
+                                    <label className="block text-[10px] font-bold text-gray-600 mb-2">Rasio Video</label>
+                                    <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl flex items-center justify-between">
+                                        <span className="text-xs font-bold text-purple-700">9:16</span>
+                                        <span className="text-[9px] text-purple-500 font-bold uppercase">TikTok/Reels/Shorts</span>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-bold text-gray-600 mb-2">Tipe Konten (Selling)</label>
+                                    <select 
+                                        value={sellingType}
+                                        onChange={(e) => setSellingType(e.target.value)}
+                                        className="w-full bg-white border border-gray-200 rounded-xl p-3 text-xs outline-none focus:ring-2 focus:ring-purple-500 transition-all"
+                                    >
+                                        <option value="soft-selling">Soft Selling (Edukasi/Halus)</option>
+                                        <option value="hard-selling">Hard Selling (Promo Langsung)</option>
+                                        <option value="story-selling">Story Selling (Bercerita)</option>
+                                        <option value="review-selling">Testimoni/Review Jujur</option>
+                                    </select>
+                                </div>
+                            </div>
                         </div>
+
                         <button onClick={handleGenerate} disabled={loading} className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-4 rounded-xl mt-8 shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2">
                             {loading ? <Loader2 className="animate-spin" size={20}/> : <Zap size={20} fill="currentColor"/>} GENERATE KONTEN
                         </button>
@@ -157,10 +197,10 @@ export default function SceneIklanGenerator({ onBack }) {
                             <div className="h-full flex flex-col items-center justify-center opacity-20 text-center text-sm italic"><ImageIcon size={64} className="mb-4"/> Visual adegan akan muncul di sini.</div>
                         ) : (
                             results.images.map((img, idx) => (
-                                <div key={idx} className="relative group">
+                                <div key={idx} className="relative group mb-4">
                                     <img src={img} className="w-full aspect-[9/16] object-cover rounded-2xl border border-gray-100 shadow-sm" alt="Scene"/>
                                     <div className="absolute top-3 left-3 bg-purple-600 text-white text-[9px] font-bold px-2 py-1 rounded-full shadow-lg">ADEGAN {idx+1}</div>
-                                    <a href={img} download={`scene-${idx+1}.png`} className="absolute bottom-3 right-3 p-2 bg-white rounded-full text-purple-600 shadow-md opacity-0 group-hover:opacity-100 transition-all"><Download size={14}/></a>
+                                    <a href={img} download={`scene-${idx+1}.png`} className="absolute bottom-3 right-3 p-2 bg-white rounded-full text-purple-600 shadow-md opacity-0 group-hover:opacity-100 transition-all shadow-purple-200"><Download size={14}/></a>
                                 </div>
                             ))
                         )}
@@ -169,14 +209,14 @@ export default function SceneIklanGenerator({ onBack }) {
 
                 {/* KOLOM 3: SCRIPT & EXPORT */}
                 <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-200 h-[85vh] flex flex-col">
-                    <h2 className="text-xl font-bold mb-6 border-l-4 border-purple-600 pl-4">Script & Audio</h2>
+                    <h2 className="text-xl font-bold mb-6 border-l-4 border-purple-600 pl-4">Script & Export</h2>
                     {!results ? (
                         <div className="h-full flex flex-col items-center justify-center opacity-20 text-center text-sm italic"><Video size={64} className="mb-4"/> Naskah akan muncul di sini.</div>
                     ) : (
                         <div className="space-y-4 h-full flex flex-col">
                             <textarea className="flex-1 w-full bg-purple-50/50 border border-purple-100 rounded-2xl p-4 text-xs leading-relaxed outline-none" value={results.script} readOnly />
                             <button onClick={() => navigator.clipboard.writeText(results.script)} className="w-full bg-gray-100 py-3 rounded-xl text-[10px] font-bold flex items-center justify-center gap-2 hover:bg-gray-200 transition-all"><Copy size={12}/> COPY NASKAH</button>
-                            <a href="https://grok.com" target="_blank" rel="noreferrer" className="w-full bg-blue-600 text-white py-4 rounded-xl text-xs font-bold text-center shadow-lg hover:bg-blue-700 transition-all">BUKA GROK (X.AI)</a>
+                            <a href="https://grok.com" target="_blank" rel="noreferrer" className="w-full bg-blue-600 text-white py-4 rounded-xl text-xs font-bold text-center shadow-lg hover:bg-blue-700 transition-all shadow-blue-100">BUKA GROK (X.AI)</a>
                         </div>
                     )}
                 </div>
@@ -185,7 +225,7 @@ export default function SceneIklanGenerator({ onBack }) {
             {/* MODAL API KEY POOL */}
             {showApiModal && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="bg-white w-full max-w-md rounded-[2.5rem] p-8 relative shadow-2xl">
+                    <div className="bg-white w-full max-w-md rounded-[2.5rem] p-8 relative shadow-2xl border border-gray-100">
                         <button onClick={() => setShowApiModal(false)} className="absolute top-6 right-6 text-gray-400 hover:text-red-500"><X/></button>
                         <h2 className="text-xl font-bold text-center mb-6 uppercase tracking-tighter">API KEY <span className="text-amber-500">POOL</span></h2>
                         <div className="space-y-3">
@@ -193,7 +233,7 @@ export default function SceneIklanGenerator({ onBack }) {
                                 <input key={idx} type="password" value={key} onChange={e => { const nk = [...apiKeys]; nk[idx] = e.target.value; setApiKeys(nk); }} placeholder={`Gemini Key #${idx + 1}`} className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 text-xs focus:ring-2 focus:ring-amber-500 outline-none" />
                             ))}
                         </div>
-                        <button onClick={() => setShowApiModal(false)} className="w-full bg-gray-900 text-white font-bold py-4 rounded-2xl mt-6 shadow-xl transition-all">SIMPAN KONFIGURASI</button>
+                        <button onClick={() => setShowApiModal(false)} className="w-full bg-gray-900 text-white font-bold py-4 rounded-2xl mt-6 shadow-xl transition-all active:scale-95">SIMPAN KONFIGURASI</button>
                     </div>
                 </div>
             )}
