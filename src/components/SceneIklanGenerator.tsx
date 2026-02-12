@@ -41,47 +41,45 @@ export default function SceneIklanGenerator({ onBack }) {
         }
     };
 
+    // --- LOGIKA GENERATE MENGGUNAKAN GEMINI 3 FLASH PREVIEW ---
     const handleGenerate = async () => {
         const apiKey = getRandomApiKey();
         if (!apiKey) return setShowApiModal(true);
         setLoading(true);
         setResults(null);
 
-        // MENGGUNAKAN VERSI v1beta UNTUK STABILITAS 2.0 FLASH
-        const baseUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+        // MENGGUNAKAN MODEL GEMINI 3 FLASH PREVIEW (Paling Anti Gagal)
+        const baseUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent";
 
         try {
-            setLoadingMsg("AI sedang menyusun naskah...");
-            const planPrompt = `Sutradara AI. Buat konsep iklan ${sellingType} untuk produk ini. Gaya: ${selectedStyle}. Buat TEPAT ${selectedSceneCount} adegan. Output HARUS JSON murni tanpa teks lain: {"script": "isi naskah", "prompts": ["visual 1", "visual 2"]}`;
+            setLoadingMsg("Gemini 3 sedang merakit naskah...");
+            const planPrompt = `Anda adalah sutradara AI kelas dunia. Buat konsep iklan ${sellingType} untuk produk ini. Gaya: ${selectedStyle}. Buat TEPAT ${selectedSceneCount} adegan storyboard. 
+            Hasilkan output dalam format JSON MURNI: {"script": "naskah lengkap narasi", "prompts": ["visual adegan 1", "visual adegan 2"]}`;
             
-            const parts = [{ text: planPrompt }];
-            if (productDesc) parts.push({ text: `Detail Produk: ${productDesc}` });
-            if (uploadedFiles.product) parts.push({ inlineData: { mimeType: "image/png", data: uploadedFiles.product.split(',')[1] } });
-
             const resPlan = await fetch(`${baseUrl}?key=${apiKey}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ contents: [{ parts }], generationConfig: { responseMimeType: "application/json" } })
+                body: JSON.stringify({ 
+                    contents: [{ parts: [{ text: planPrompt }, { text: `Deskripsi Produk: ${productDesc}` }] }],
+                    generationConfig: { responseMimeType: "application/json" }
+                })
             });
             
             const dataPlan = await resPlan.json();
-            
-            if (!dataPlan.candidates?.[0]?.content?.parts?.[0]?.text) {
-                throw new Error("API Gemini tidak memberikan respon teks. Pastikan API Key aktif.");
-            }
-
-            const rawText = dataPlan.candidates[0].content.parts[0].text;
-            const plan = JSON.parse(rawText.replace(/```json|```/g, "").trim());
+            const plan = JSON.parse(dataPlan.candidates[0].content.parts[0].text);
 
             const images = [];
             for (let i = 0; i < plan.prompts.length; i++) {
-                const currentKey = getRandomApiKey() || apiKey; // ROTASI 5 API KEY
+                const currentKey = getRandomApiKey() || apiKey;
                 setLoadingMsg(`Visual Adegan ${i + 1}/${selectedSceneCount}...`);
                 
-                const imgRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-image-preview:generateContent?key=${currentKey}`, {
+                // Jeda minimal agar API tidak kaget
+                await delay(1000);
+
+                const imgRes = await fetch(`${baseUrl}?key=${currentKey}`, {
                     method: 'POST',
                     body: JSON.stringify({ 
-                        contents: [{ parts: [{ text: `${plan.prompts[i]}, ultra-realistic, cinematic lighting, 9:16 vertical` }] }],
+                        contents: [{ parts: [{ text: `${plan.prompts[i]}, ultra-realistic, cinematic, 9:16 vertical` }] }],
                         generationConfig: { responseModalities: ["IMAGE"] }
                     })
                 });
@@ -89,8 +87,8 @@ export default function SceneIklanGenerator({ onBack }) {
                 const imgData = await imgRes.json();
                 
                 if (imgRes.status === 429) {
-                    setLoadingMsg("Limit RPM! Menunggu 10 detik...");
-                    await delay(10000);
+                    setLoadingMsg("Rate limit! Menunggu 15 detik...");
+                    await delay(15000);
                     i--; continue;
                 }
 
@@ -99,23 +97,20 @@ export default function SceneIklanGenerator({ onBack }) {
                     if (imgPart) {
                         images.push(`data:image/png;base64,${imgPart.inlineData.data}`);
                     } else {
-                        images.push("https://via.placeholder.com/1080x1920?text=Gambar+Kosong");
+                        images.push("https://via.placeholder.com/1080x1920?text=Visual+Gagal");
                     }
-                } else {
-                    images.push("https://via.placeholder.com/1080x1920?text=Adegan+Gagal");
                 }
-                
+
                 if (i < plan.prompts.length - 1) {
-                    setLoadingMsg(`Adegan ${i+1} OK. Jeda 5 detik anti-limit...`);
-                    await delay(5000); // JEDA 5 DETIK WAJIB
+                    setLoadingMsg(`Adegan ${i+1} OK. Istirahat 5 detik...`);
+                    await delay(5000); // JEDA WAJIB RPM
                 }
             }
             setResults({ script: plan.script, images, prompts: plan.prompts });
         } catch (e) { 
-            alert("Terjadi gangguan: " + e.message); 
+            alert("Gangguan: " + e.message); 
         } finally { 
-            setLoading(false); 
-            setLoadingMsg(''); 
+            setLoading(false); setLoadingMsg(''); 
         }
     };
 
@@ -128,7 +123,7 @@ export default function SceneIklanGenerator({ onBack }) {
             </header>
 
             <main className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* LANGKAH 1 & 2: INPUT LENGKAP */}
+                {/* INPUT LENGKAP - DIKUNCI AGAR TIDAK HILANG */}
                 <div className="space-y-6 overflow-y-auto max-h-[85vh] pr-2 custom-scrollbar">
                     <section className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
                         <h2 className="text-lg font-bold mb-4">Langkah 1: Pilih Gaya</h2>
@@ -147,7 +142,6 @@ export default function SceneIklanGenerator({ onBack }) {
                     <section className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
                         <h2 className="text-lg font-bold mb-6">Langkah 2: Detail Konten</h2>
                         <div className="space-y-8">
-                            {/* 1. Produk & Background */}
                             <div className="pl-7 space-y-4 border-l-2 border-gray-50 ml-2">
                                 <label className="block text-xs font-bold text-gray-400 uppercase tracking-tighter">1. Produk & Background</label>
                                 <div className="grid grid-cols-2 gap-2">
@@ -162,10 +156,9 @@ export default function SceneIklanGenerator({ onBack }) {
                                         <p className="text-[9px] mt-1 text-gray-500 font-bold">Background</p>
                                     </div>
                                 </div>
-                                <textarea value={productDesc} onChange={(e) => setProductDesc(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs h-20 outline-none focus:ring-2 focus:ring-purple-500 transition-all" placeholder="Ceritakan detail produk..."/>
+                                <textarea value={productDesc} onChange={(e) => setProductDesc(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs h-20 outline-none focus:ring-2 focus:ring-purple-500" placeholder="Ceritakan detail produk..."/>
                             </div>
 
-                            {/* 2. Model */}
                             <div className="pl-7 border-l-2 border-gray-50 ml-2">
                                 <label className="block text-xs font-bold text-gray-400 uppercase mb-3 tracking-tighter">2. Model</label>
                                 <div className="flex bg-gray-100 p-1 rounded-xl mb-3 shadow-inner">
@@ -173,35 +166,28 @@ export default function SceneIklanGenerator({ onBack }) {
                                     <button onClick={() => setModelMode('generate')} className={`flex-1 py-2 text-[10px] font-bold rounded-lg transition-all ${modelMode === 'generate' ? 'bg-purple-600 text-white shadow-md' : 'text-gray-500'}`}>Generator AI</button>
                                 </div>
                                 {modelMode === 'upload' ? (
-                                    <div className="relative border-2 border-dashed rounded-xl p-3 text-center hover:bg-purple-50 group transition-all">
+                                    <div className="relative border-2 border-dashed rounded-xl p-3 text-center hover:bg-purple-50 transition-all">
                                         <input type="file" onChange={(e) => handleFileChange(e, 'model')} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
-                                        {uploadedFiles.model ? <CheckCircle2 className="mx-auto text-green-500" size={20}/> : <Upload className="mx-auto text-gray-400 group-hover:text-purple-500" size={20}/>}
+                                        {uploadedFiles.model ? <CheckCircle2 className="mx-auto text-green-500" size={20}/> : <Upload className="mx-auto text-gray-400" size={20}/>}
                                         <p className="text-[9px] mt-1 font-bold text-gray-500">Foto Model</p>
                                     </div>
                                 ) : (
-                                    <textarea value={modelAIDesc} onChange={(e) => setModelAIDesc(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs h-20 outline-none focus:ring-2 focus:ring-purple-500" placeholder="Cth: Wanita Asia, rambut panjang..."/>
+                                    <textarea value={modelAIDesc} onChange={(e) => setModelAIDesc(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs h-20 outline-none focus:ring-2 focus:ring-purple-500" placeholder="Cth: Wanita Asia..."/>
                                 )}
                             </div>
 
-                            {/* 3. Pengaturan Iklan */}
                             <div className="pl-7 space-y-4 border-l-2 border-gray-50 ml-2">
                                 <label className="block text-xs font-bold text-gray-400 uppercase tracking-tighter">3. Pengaturan Iklan</label>
-                                <div>
-                                    <label className="block text-[10px] font-bold text-gray-600 mb-2">Rasio Video</label>
-                                    <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl flex items-center justify-between shadow-sm">
-                                        <span className="text-xs font-bold text-purple-700">9:16</span>
-                                        <span className="text-[9px] text-purple-500 font-bold uppercase">TikTok/Reels/Shorts</span>
-                                    </div>
+                                <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl flex items-center justify-between shadow-sm">
+                                    <span className="text-xs font-bold text-purple-700">9:16</span>
+                                    <span className="text-[9px] text-purple-500 font-bold uppercase">TikTok/Reels/Shorts</span>
                                 </div>
-                                <div>
-                                    <label className="block text-[10px] font-bold text-gray-600 mb-2">Tipe Konten (Selling)</label>
-                                    <select value={sellingType} onChange={(e) => setSellingType(e.target.value)} className="w-full bg-white border border-gray-200 rounded-xl p-3 text-xs outline-none focus:ring-2 focus:ring-purple-500 transition-all shadow-sm">
-                                        <option value="soft-selling">Soft Selling (Edukasi/Halus)</option>
-                                        <option value="hard-selling">Hard Selling (Promo Langsung)</option>
-                                        <option value="story-selling">Story Selling (Bercerita)</option>
-                                        <option value="review-selling">Testimoni/Review Jujur</option>
-                                    </select>
-                                </div>
+                                <select value={sellingType} onChange={(e) => setSellingType(e.target.value)} className="w-full bg-white border border-gray-200 rounded-xl p-3 text-xs outline-none focus:ring-2 focus:ring-purple-500 transition-all shadow-sm">
+                                    <option value="soft-selling">Soft Selling (Edukasi/Halus)</option>
+                                    <option value="hard-selling">Hard Selling (Promo Langsung)</option>
+                                    <option value="story-selling">Story Selling (Bercerita)</option>
+                                    <option value="review-selling">Testimoni/Review Jujur</option>
+                                </select>
                             </div>
                         </div>
 
@@ -211,9 +197,8 @@ export default function SceneIklanGenerator({ onBack }) {
                     </section>
                 </div>
 
-                {/* KOLOM 2: VISUAL STORYBOARD */}
                 <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-200 h-[85vh] flex flex-col">
-                    <h2 className="text-xl font-bold mb-6 border-l-4 border-purple-600 pl-4 uppercase tracking-tighter">Visual Storyboard</h2>
+                    <h2 className="text-xl font-bold mb-6 border-l-4 border-purple-600 pl-4 uppercase tracking-tighter italic">Visual Storyboard</h2>
                     <div className="flex-1 overflow-y-auto space-y-6 pr-2 custom-scrollbar">
                         {!results ? (
                             <div className="h-full flex flex-col items-center justify-center opacity-20 text-center text-sm italic"><ImageIcon size={64} className="mb-4 text-purple-600 animate-pulse"/> Visual adegan akan muncul di sini.</div>
@@ -221,7 +206,7 @@ export default function SceneIklanGenerator({ onBack }) {
                             results.images.map((img, idx) => (
                                 <div key={idx} className="relative group mb-4">
                                     <img src={img} className="w-full aspect-[9/16] object-cover rounded-2xl border border-gray-100 shadow-md" alt="Scene"/>
-                                    <div className="absolute top-3 left-3 bg-purple-600 text-white text-[9px] font-bold px-2 py-1 rounded-full shadow-lg border border-purple-400">ADEGAN {idx+1}</div>
+                                    <div className="absolute top-3 left-3 bg-purple-600 text-white text-[9px] font-bold px-2 py-1 rounded-full shadow-lg">ADEGAN {idx+1}</div>
                                     <a href={img} download={`scene-${idx+1}.png`} className="absolute bottom-3 right-3 p-2 bg-white/90 backdrop-blur-sm rounded-full text-purple-600 shadow-xl opacity-0 group-hover:opacity-100 transition-all scale-110"><Download size={14}/></a>
                                 </div>
                             ))
@@ -229,18 +214,15 @@ export default function SceneIklanGenerator({ onBack }) {
                     </div>
                 </div>
 
-                {/* KOLOM 3: SCRIPT & EXPORT */}
                 <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-200 h-[85vh] flex flex-col">
-                    <h2 className="text-xl font-bold mb-6 border-l-4 border-purple-600 pl-4 uppercase tracking-tighter">Script & Export</h2>
+                    <h2 className="text-xl font-bold mb-6 border-l-4 border-purple-600 pl-4 uppercase tracking-tighter italic">Script & Export</h2>
                     {!results ? (
                         <div className="h-full flex flex-col items-center justify-center opacity-20 text-center text-sm italic"><Video size={64} className="mb-4 text-purple-600 animate-pulse"/> Naskah akan muncul di sini.</div>
                     ) : (
                         <div className="space-y-4 h-full flex flex-col">
                             <textarea className="flex-1 w-full bg-purple-50/50 border border-purple-100 rounded-2xl p-4 text-xs leading-relaxed outline-none shadow-inner" value={results.script} readOnly />
-                            <div className="grid grid-cols-2 gap-2">
-                                <button onClick={() => navigator.clipboard.writeText(results.script)} className="bg-gray-100 py-3 rounded-xl text-[10px] font-bold flex items-center justify-center gap-2 hover:bg-gray-200 transition-all"><Copy size={12}/> COPY</button>
-                                <a href="https://grok.com" target="_blank" rel="noreferrer" className="bg-blue-600 text-white py-3 rounded-xl text-[10px] font-bold text-center shadow-lg hover:bg-blue-700 transition-all flex items-center justify-center gap-2">X.AI (GROK)</a>
-                            </div>
+                            <button onClick={() => navigator.clipboard.writeText(results.script)} className="bg-gray-100 py-3 rounded-xl text-[10px] font-bold flex items-center justify-center gap-2 hover:bg-gray-200 transition-all shadow-sm"><Copy size={12}/> COPY NASKAH</button>
+                            <a href="https://grok.com" target="_blank" rel="noreferrer" className="bg-blue-600 text-white py-4 rounded-xl text-xs font-bold text-center shadow-lg hover:bg-blue-700 transition-all">BUKA GROK (X.AI)</a>
                         </div>
                     )}
                 </div>
@@ -249,21 +231,19 @@ export default function SceneIklanGenerator({ onBack }) {
             {/* MODAL API KEY POOL */}
             {showApiModal && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
-                    <div className="bg-white w-full max-w-md rounded-[2.5rem] p-8 relative shadow-2xl border-2 border-purple-100">
+                    <div className="bg-white w-full max-w-md rounded-[2.5rem] p-8 relative shadow-2xl border-2 border-purple-100 shadow-purple-200">
                         <button onClick={() => setShowApiModal(false)} className="absolute top-6 right-6 text-gray-400 hover:text-red-500 transition-colors"><X/></button>
                         <h2 className="text-xl font-bold text-center mb-6 uppercase tracking-tighter italic">API KEY <span className="text-amber-500">POOL</span></h2>
-                        <p className="text-[10px] text-gray-400 text-center mb-6 uppercase tracking-widest leading-none">Sistem Rotasi Anti-Limit RPM</p>
                         <div className="space-y-3">
                             {apiKeys.map((key, idx) => (
-                                <input key={idx} type="password" value={key} onChange={e => { const nk = [...apiKeys]; nk[idx] = e.target.value; setApiKeys(nk); }} placeholder={`Gemini Key #${idx + 1}`} className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 text-xs focus:ring-2 focus:ring-amber-500 outline-none transition-all" />
+                                <input key={idx} type="password" value={key} onChange={e => { const nk = [...apiKeys]; nk[idx] = e.target.value; setApiKeys(nk); }} placeholder={`Gemini Key #${idx + 1}`} className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 text-xs focus:ring-2 focus:ring-amber-500 outline-none transition-all shadow-sm" />
                             ))}
                         </div>
-                        <button onClick={() => setShowApiModal(false)} className="w-full bg-gray-900 text-white font-bold py-5 rounded-2xl mt-8 shadow-xl hover:bg-black transition-all active:scale-95">SIMPAN KONFIGURASI</button>
+                        <button onClick={() => setShowApiModal(false)} className="w-full bg-gray-900 text-white font-bold py-5 rounded-2xl mt-8 shadow-xl hover:bg-black transition-all active:scale-95 uppercase tracking-widest">SIMPAN KONFIGURASI</button>
                     </div>
                 </div>
             )}
 
-            {/* LOADING OVERLAY */}
             {loading && (
                 <div className="fixed inset-0 bg-white/90 backdrop-blur-xl z-[100] flex items-center justify-center">
                     <div className="text-center">
@@ -271,8 +251,8 @@ export default function SceneIklanGenerator({ onBack }) {
                             <Loader2 className="w-20 h-20 text-purple-600 animate-spin mx-auto"/>
                             <Zap className="absolute inset-0 m-auto text-purple-600 animate-pulse" size={32}/>
                         </div>
-                        <p className="text-2xl font-black text-gray-900 uppercase tracking-tighter mb-2">{loadingMsg}</p>
-                        <p className="text-xs text-gray-400 italic">Harap tunggu, proses ini menjaga API tetap dingin...</p>
+                        <p className="text-2xl font-black text-gray-900 uppercase tracking-tighter mb-2 italic">{loadingMsg}</p>
+                        <p className="text-xs text-gray-400 italic">Gemini 3 Flash Preview sedang bekerja...</p>
                     </div>
                 </div>
             )}
