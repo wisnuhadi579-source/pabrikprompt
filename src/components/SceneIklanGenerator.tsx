@@ -10,7 +10,6 @@ export default function SceneIklanGenerator({ onBack }) {
     const [loadingMsg, setLoadingMsg] = useState('');
     const [results, setResults] = useState(null);
 
-    // --- FITUR YANG DIKEMBALIKAN (LENGKAP) ---
     const [productDesc, setProductDesc] = useState('');
     const [modelAIDesc, setModelAIDesc] = useState('');
     const [sellingType, setSellingType] = useState('soft-selling');
@@ -42,6 +41,7 @@ export default function SceneIklanGenerator({ onBack }) {
         }
     };
 
+    // --- LOGIKA GENERATE DENGAN PENGAMAN (FIX ERROR 'READING 0') ---
     const handleGenerate = async () => {
         const apiKey = getRandomApiKey();
         if (!apiKey) return setShowApiModal(true);
@@ -50,7 +50,7 @@ export default function SceneIklanGenerator({ onBack }) {
 
         try {
             setLoadingMsg("AI sedang menyusun naskah...");
-            const planPrompt = `Sutradara AI. Produk: ${productDesc}. Tipe: ${sellingType}. Adegan: ${selectedSceneCount}. Gaya: ${selectedStyle}. JSON: {"script": "naskah lengkap", "prompts": ["visual adegan 1", "visual adegan 2"]}`;
+            const planPrompt = `Sutradara AI. Produk: ${productDesc}. Tipe: ${sellingType}. Adegan: ${selectedSceneCount}. Gaya: ${selectedStyle}. Balas HANYA dengan format JSON: {"script": "isi naskah", "prompts": ["visual 1", "visual 2"]}`;
             
             const parts = [{ text: planPrompt }];
             if (uploadedFiles.product) parts.push({ inlineData: { mimeType: "image/png", data: uploadedFiles.product.split(',')[1] } });
@@ -60,37 +60,59 @@ export default function SceneIklanGenerator({ onBack }) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ contents: [{ parts }], generationConfig: { responseMimeType: "application/json" } })
             });
-            const plan = JSON.parse((await resPlan.json()).candidates[0].content.parts[0].text);
+            
+            const dataPlan = await resPlan.json();
+            
+            // PENGAMAN 1: Cek apakah respon valid
+            if (!dataPlan.candidates || !dataPlan.candidates[0]) {
+                throw new Error("API Gemini tidak memberikan respon. Coba ganti API Key.");
+            }
+
+            const planText = dataPlan.candidates[0].content.parts[0].text;
+            const plan = JSON.parse(planText);
 
             const images = [];
             for (let i = 0; i < plan.prompts.length; i++) {
-                const currentKey = getRandomApiKey() || apiKey; // Rotasi 5 API Key
+                const currentKey = getRandomApiKey() || apiKey;
                 setLoadingMsg(`Visual Adegan ${i + 1}/${selectedSceneCount}...`);
                 
                 const imgRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-image-preview:generateContent?key=${currentKey}`, {
                     method: 'POST',
                     body: JSON.stringify({ 
-                        contents: [{ parts: [{ text: `${plan.prompts[i]}, ultra-realistic, 9:16 vertical` }] }],
+                        contents: [{ parts: [{ text: `${plan.prompts[i]}, ultra-realistic, 9:16 vertical aspect ratio` }] }],
                         generationConfig: { responseModalities: ["IMAGE"] }
                     })
                 });
 
+                const imgData = await imgRes.json();
+                
+                // PENGAMAN 2: Cek respon gambar
                 if (imgRes.status === 429) {
                     setLoadingMsg("Limit RPM! Menunggu 10 detik...");
                     await delay(10000);
                     i--; continue;
                 }
 
-                images.push(`data:image/png;base64,${(await imgRes.json()).candidates[0].content.parts.find(p => p.inlineData).inlineData.data}`);
+                if (imgData.candidates && imgData.candidates[0]) {
+                    const base64 = imgData.candidates[0].content.parts.find(p => p.inlineData).inlineData.data;
+                    images.push(`data:image/png;base64,${base64}`);
+                } else {
+                    images.push("https://via.placeholder.com/1080x1920?text=Gambar+Gagal");
+                }
                 
                 if (i < plan.prompts.length - 1) {
                     setLoadingMsg(`Berhasil! Jeda 5 detik anti-limit...`);
-                    await delay(5000); // Jeda 5 detik antar generate
+                    await delay(5000); 
                 }
             }
             setResults({ script: plan.script, images, prompts: plan.prompts });
-        } catch (e) { alert("Error: " + e.message); }
-        finally { setLoading(false); setLoadingMsg(''); }
+        } catch (e) { 
+            console.error(e);
+            alert("Terjadi gangguan: " + e.message); 
+        } finally { 
+            setLoading(false); 
+            setLoadingMsg(''); 
+        }
     };
 
     return (
@@ -102,7 +124,7 @@ export default function SceneIklanGenerator({ onBack }) {
             </header>
 
             <main className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* KOLOM 1: INPUT DETAIL LENGKAP */}
+                {/* KOLOM 1: INPUT LENGKAP */}
                 <div className="space-y-6 overflow-y-auto max-h-[85vh] pr-2 custom-scrollbar">
                     <section className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
                         <h2 className="text-lg font-bold mb-4">Langkah 1: Pilih Gaya</h2>
@@ -121,7 +143,6 @@ export default function SceneIklanGenerator({ onBack }) {
                     <section className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
                         <h2 className="text-lg font-bold mb-6">Langkah 2: Detail Konten</h2>
                         <div className="space-y-8">
-                            {/* 1. Produk & Background */}
                             <div className="pl-7 space-y-4 border-l-2 border-gray-50 ml-2">
                                 <label className="block text-xs font-bold text-gray-400 uppercase tracking-tighter">1. Produk & Background</label>
                                 <div className="grid grid-cols-2 gap-2">
@@ -139,7 +160,6 @@ export default function SceneIklanGenerator({ onBack }) {
                                 <textarea value={productDesc} onChange={(e) => setProductDesc(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs h-20 outline-none" placeholder="Ceritakan detail produk Anda..."/>
                             </div>
 
-                            {/* 2. Model */}
                             <div className="pl-7 border-l-2 border-gray-50 ml-2">
                                 <label className="block text-xs font-bold text-gray-400 uppercase mb-3 tracking-tighter">2. Model</label>
                                 <div className="flex bg-gray-100 p-1 rounded-xl mb-3">
@@ -157,7 +177,6 @@ export default function SceneIklanGenerator({ onBack }) {
                                 )}
                             </div>
 
-                            {/* 3. Pengaturan Iklan (DIKEMBALIKAN) */}
                             <div className="pl-7 space-y-4 border-l-2 border-gray-50 ml-2">
                                 <label className="block text-xs font-bold text-gray-400 uppercase tracking-tighter">3. Pengaturan Iklan</label>
                                 <div>
@@ -222,7 +241,6 @@ export default function SceneIklanGenerator({ onBack }) {
                 </div>
             </main>
 
-            {/* MODAL API KEY POOL */}
             {showApiModal && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                     <div className="bg-white w-full max-w-md rounded-[2.5rem] p-8 relative shadow-2xl border border-gray-100">
@@ -238,7 +256,6 @@ export default function SceneIklanGenerator({ onBack }) {
                 </div>
             )}
 
-            {/* LOADING OVERLAY */}
             {loading && (
                 <div className="fixed inset-0 bg-white/80 backdrop-blur-md z-[100] flex items-center justify-center">
                     <div className="text-center">
