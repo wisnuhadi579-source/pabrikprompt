@@ -41,41 +41,57 @@ export default function SceneIklanGenerator({ onBack }) {
         }
     };
 
-    // --- LOGIKA GENERATE MENGGUNAKAN GEMINI 3 FLASH PREVIEW ---
+    // --- FUNGSI PENYARING RESPON (ANTI-ERROR 'READING 0') ---
+    const parseGeminiResponse = (data) => {
+        try {
+            // Cek apakah struktur dasar candidates[0] tersedia
+            if (!data?.candidates?.[0]?.content?.parts?.[0]?.text) {
+                return null;
+            }
+            const rawText = data.candidates[0].content.parts[0].text;
+            // Bersihkan markdown jika ada
+            const cleanJson = rawText.replace(/```json|```/g, "").trim();
+            return JSON.parse(cleanJson);
+        } catch (e) {
+            console.error("Gagal parse JSON:", e);
+            return null;
+        }
+    };
+
     const handleGenerate = async () => {
         const apiKey = getRandomApiKey();
         if (!apiKey) return setShowApiModal(true);
         setLoading(true);
         setResults(null);
 
-        // MENGGUNAKAN MODEL GEMINI 3 FLASH PREVIEW (Paling Anti Gagal)
+        // MENGGUNAKAN MODEL GEMINI 3 FLASH PREVIEW
         const baseUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent";
 
         try {
             setLoadingMsg("Gemini 3 sedang merakit naskah...");
-            const planPrompt = `Anda adalah sutradara AI kelas dunia. Buat konsep iklan ${sellingType} untuk produk ini. Gaya: ${selectedStyle}. Buat TEPAT ${selectedSceneCount} adegan storyboard. 
-            Hasilkan output dalam format JSON MURNI: {"script": "naskah lengkap narasi", "prompts": ["visual adegan 1", "visual adegan 2"]}`;
+            const planPrompt = `Sutradara AI. Produk: ${productDesc}. Gaya: ${selectedStyle}. Tipe: ${sellingType}. Adegan: ${selectedSceneCount}. Balas HANYA JSON: {"script": "isi naskah", "prompts": ["visual 1", "visual 2"]}`;
             
             const resPlan = await fetch(`${baseUrl}?key=${apiKey}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
-                    contents: [{ parts: [{ text: planPrompt }, { text: `Deskripsi Produk: ${productDesc}` }] }],
+                    contents: [{ parts: [{ text: planPrompt }] }],
                     generationConfig: { responseMimeType: "application/json" }
                 })
             });
             
             const dataPlan = await resPlan.json();
-            const plan = JSON.parse(dataPlan.candidates[0].content.parts[0].text);
+            const plan = parseGeminiResponse(dataPlan);
+
+            if (!plan) {
+                throw new Error("Format naskah tidak dikenali. Silakan coba lagi.");
+            }
 
             const images = [];
             for (let i = 0; i < plan.prompts.length; i++) {
                 const currentKey = getRandomApiKey() || apiKey;
                 setLoadingMsg(`Visual Adegan ${i + 1}/${selectedSceneCount}...`);
                 
-                // Jeda minimal agar API tidak kaget
-                await delay(1000);
-
                 const imgRes = await fetch(`${baseUrl}?key=${currentKey}`, {
                     method: 'POST',
                     body: JSON.stringify({ 
@@ -92,18 +108,17 @@ export default function SceneIklanGenerator({ onBack }) {
                     i--; continue;
                 }
 
-                if (imgData.candidates?.[0]?.content?.parts) {
-                    const imgPart = imgData.candidates[0].content.parts.find(p => p.inlineData);
-                    if (imgPart) {
-                        images.push(`data:image/png;base64,${imgPart.inlineData.data}`);
-                    } else {
-                        images.push("https://via.placeholder.com/1080x1920?text=Visual+Gagal");
-                    }
+                // Cek data gambar secara aman
+                const imgPart = imgData?.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
+                if (imgPart) {
+                    images.push(`data:image/png;base64,${imgPart.inlineData.data}`);
+                } else {
+                    images.push("https://via.placeholder.com/1080x1920?text=Sensor+AI+Aktif");
                 }
 
                 if (i < plan.prompts.length - 1) {
                     setLoadingMsg(`Adegan ${i+1} OK. Istirahat 5 detik...`);
-                    await delay(5000); // JEDA WAJIB RPM
+                    await delay(5000); 
                 }
             }
             setResults({ script: plan.script, images, prompts: plan.prompts });
@@ -115,7 +130,7 @@ export default function SceneIklanGenerator({ onBack }) {
     };
 
     return (
-        <div className="min-h-screen bg-[#f3f4f6] text-gray-900 p-4 md:p-8 font-sans">
+        <div className="min-h-screen bg-[#f3f4f6] text-gray-900 p-4 md:p-8 font-sans italic">
             <header className="max-w-7xl mx-auto flex justify-between items-center mb-8 border-b border-gray-200 pb-6">
                 <button onClick={onBack} className="text-gray-500 hover:text-purple-600 flex items-center gap-2 font-medium transition-all"><ArrowLeft size={20}/> Kembali</button>
                 <h1 className="text-2xl md:text-3xl font-bold italic">Video Grok <span className="text-purple-600">Generator</span></h1>
@@ -123,7 +138,7 @@ export default function SceneIklanGenerator({ onBack }) {
             </header>
 
             <main className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* INPUT LENGKAP - DIKUNCI AGAR TIDAK HILANG */}
+                {/* LANGKAH 1 & 2: INPUT LENGKAP */}
                 <div className="space-y-6 overflow-y-auto max-h-[85vh] pr-2 custom-scrollbar">
                     <section className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
                         <h2 className="text-lg font-bold mb-4">Langkah 1: Pilih Gaya</h2>
@@ -142,23 +157,25 @@ export default function SceneIklanGenerator({ onBack }) {
                     <section className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
                         <h2 className="text-lg font-bold mb-6">Langkah 2: Detail Konten</h2>
                         <div className="space-y-8">
+                            {/* 1. Produk & Background */}
                             <div className="pl-7 space-y-4 border-l-2 border-gray-50 ml-2">
                                 <label className="block text-xs font-bold text-gray-400 uppercase tracking-tighter">1. Produk & Background</label>
                                 <div className="grid grid-cols-2 gap-2">
                                     <div className="relative border-2 border-dashed rounded-xl p-3 text-center hover:bg-purple-50 transition-all group">
                                         <input type="file" onChange={(e) => handleFileChange(e, 'product')} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
                                         {uploadedFiles.product ? <CheckCircle2 className="mx-auto text-green-500" size={20}/> : <Upload className="mx-auto text-gray-400 group-hover:text-purple-500" size={20}/>}
-                                        <p className="text-[9px] mt-1 text-gray-500 font-bold">Foto Produk</p>
+                                        <p className="text-[9px] mt-1 text-gray-500 font-bold">Foto Produk Utama</p>
                                     </div>
                                     <div className="relative border-2 border-dashed rounded-xl p-3 text-center hover:bg-purple-50 transition-all group">
                                         <input type="file" onChange={(e) => handleFileChange(e, 'background')} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
                                         {uploadedFiles.background ? <CheckCircle2 className="mx-auto text-green-500" size={20}/> : <Upload className="mx-auto text-gray-400 group-hover:text-purple-500" size={20}/>}
-                                        <p className="text-[9px] mt-1 text-gray-500 font-bold">Background</p>
+                                        <p className="text-[9px] mt-1 text-gray-500 font-bold">Upload Background</p>
                                     </div>
                                 </div>
                                 <textarea value={productDesc} onChange={(e) => setProductDesc(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs h-20 outline-none focus:ring-2 focus:ring-purple-500" placeholder="Ceritakan detail produk..."/>
                             </div>
 
+                            {/* 2. Model */}
                             <div className="pl-7 border-l-2 border-gray-50 ml-2">
                                 <label className="block text-xs font-bold text-gray-400 uppercase mb-3 tracking-tighter">2. Model</label>
                                 <div className="flex bg-gray-100 p-1 rounded-xl mb-3 shadow-inner">
@@ -176,6 +193,7 @@ export default function SceneIklanGenerator({ onBack }) {
                                 )}
                             </div>
 
+                            {/* 3. Pengaturan Iklan */}
                             <div className="pl-7 space-y-4 border-l-2 border-gray-50 ml-2">
                                 <label className="block text-xs font-bold text-gray-400 uppercase tracking-tighter">3. Pengaturan Iklan</label>
                                 <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl flex items-center justify-between shadow-sm">
@@ -197,6 +215,7 @@ export default function SceneIklanGenerator({ onBack }) {
                     </section>
                 </div>
 
+                {/* KOLOM 2: VISUAL STORYBOARD */}
                 <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-200 h-[85vh] flex flex-col">
                     <h2 className="text-xl font-bold mb-6 border-l-4 border-purple-600 pl-4 uppercase tracking-tighter italic">Visual Storyboard</h2>
                     <div className="flex-1 overflow-y-auto space-y-6 pr-2 custom-scrollbar">
@@ -207,13 +226,14 @@ export default function SceneIklanGenerator({ onBack }) {
                                 <div key={idx} className="relative group mb-4">
                                     <img src={img} className="w-full aspect-[9/16] object-cover rounded-2xl border border-gray-100 shadow-md" alt="Scene"/>
                                     <div className="absolute top-3 left-3 bg-purple-600 text-white text-[9px] font-bold px-2 py-1 rounded-full shadow-lg">ADEGAN {idx+1}</div>
-                                    <a href={img} download={`scene-${idx+1}.png`} className="absolute bottom-3 right-3 p-2 bg-white/90 backdrop-blur-sm rounded-full text-purple-600 shadow-xl opacity-0 group-hover:opacity-100 transition-all scale-110"><Download size={14}/></a>
+                                    <a href={img} download={`scene-${idx+1}.png`} className="absolute bottom-3 right-3 p-2 bg-white rounded-full text-purple-600 shadow-md opacity-0 group-hover:opacity-100 transition-all scale-110"><Download size={14}/></a>
                                 </div>
                             ))
                         )}
                     </div>
                 </div>
 
+                {/* KOLOM 3: SCRIPT & EXPORT */}
                 <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-200 h-[85vh] flex flex-col">
                     <h2 className="text-xl font-bold mb-6 border-l-4 border-purple-600 pl-4 uppercase tracking-tighter italic">Script & Export</h2>
                     {!results ? (
@@ -252,7 +272,7 @@ export default function SceneIklanGenerator({ onBack }) {
                             <Zap className="absolute inset-0 m-auto text-purple-600 animate-pulse" size={32}/>
                         </div>
                         <p className="text-2xl font-black text-gray-900 uppercase tracking-tighter mb-2 italic">{loadingMsg}</p>
-                        <p className="text-xs text-gray-400 italic">Gemini 3 Flash Preview sedang bekerja...</p>
+                        <p className="text-xs text-gray-400 italic">Proteksi Safe-Response aktif...</p>
                     </div>
                 </div>
             )}
