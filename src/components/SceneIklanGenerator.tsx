@@ -55,7 +55,7 @@ export default function SceneIklanGenerator({ onBack }) {
             const parts = [{ text: planPrompt }];
             if (uploadedFiles.product) parts.push({ inlineData: { mimeType: "image/png", data: uploadedFiles.product.split(',')[1] } });
 
-            const resPlan = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+            const resPlan = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ contents: [{ parts }], generationConfig: { responseMimeType: "application/json" } })
@@ -76,7 +76,7 @@ export default function SceneIklanGenerator({ onBack }) {
                 const currentKey = getRandomApiKey() || apiKey;
                 setLoadingMsg(`Visual Adegan ${i + 1}/${selectedSceneCount}...`);
                 
-                const imgRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-image-preview:generateContent?key=${currentKey}`, {
+                const imgRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${currentKey}`, {
                     method: 'POST',
                     body: JSON.stringify({ 
                         contents: [{ parts: [{ text: `${plan.prompts[i]}, ultra-realistic, 9:16 vertical aspect ratio` }] }],
